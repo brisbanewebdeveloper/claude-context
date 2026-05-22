@@ -284,6 +284,43 @@ startup_timeout_ms = 20000
 </details>
 
 <details>
+<summary><strong>OpenAI Codex CLI with remote HTTP server and Ollama</strong></summary>
+
+Use this when Codex is authenticated with a ChatGPT Plus/Pro/Team account and the MCP server should run separately over HTTP. The ChatGPT login stays in Codex; Claude Context uses Ollama for embeddings and Milvus/Zilliz for vector storage.
+
+1. Start the Docker Compose stack:
+
+```bash
+OLLAMA_MODEL=nomic-embed-text \
+CLAUDE_CONTEXT_WORKSPACE=/absolute/path/to/your/project \
+MILVUS_TOKEN=your-zilliz-cloud-api-key \
+docker compose up --build
+```
+
+2. Add the remote MCP URL to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.claude-context]
+url = "http://localhost:3000/mcp"
+```
+
+3. Restart Codex CLI, then initialize the index from Codex:
+
+```text
+Index /workspace
+```
+
+4. Check progress:
+
+```text
+Check indexing status for /workspace
+```
+
+The Compose stack runs Ollama locally for embeddings, but Claude Context still needs Milvus/Zilliz for vector storage. Set `MILVUS_TOKEN` for Zilliz auto-resolution, or set `MILVUS_ADDRESS` for a self-managed Milvus endpoint. The HTTP endpoint is unauthenticated. Bind it only to localhost or a trusted private network unless you add a reverse proxy with authentication.
+
+</details>
+
+<details>
 <summary><strong>Gemini CLI</strong></summary>
 
 Gemini CLI requires manual configuration through a JSON file:
@@ -669,11 +706,13 @@ For LangChain/LangGraph integration examples, see [this example](https://github.
 <details>
 <summary><strong>Other MCP Clients</strong></summary>
 
-The server uses stdio transport and follows the standard MCP protocol. It can be integrated with any MCP-compatible client by running:
+The server supports stdio by default and can also run as a remote Streamable HTTP MCP server. It can be integrated with any local MCP-compatible client by running:
 
 ```bash
 npx @zilliz/claude-context-mcp@latest
 ```
+
+For remote HTTP clients, start with `--transport http --host 0.0.0.0 --port 3000 --path /mcp` and configure the client with `http://<host>:3000/mcp`.
 
 </details>
 

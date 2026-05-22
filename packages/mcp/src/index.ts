@@ -30,8 +30,10 @@ import { createEmbeddingInstance, logEmbeddingProviderInfo } from "./embedding.j
 import { SnapshotManager } from "./snapshot.js";
 import { SyncManager } from "./sync.js";
 import { ToolHandlers } from "./handlers.js";
+import { startHttpTransport } from "./http.js";
 
 class ContextMcpServer {
+    private config: ContextMcpConfig;
     private server: Server;
     private context: Context;
     private snapshotManager: SnapshotManager;
@@ -39,6 +41,7 @@ class ContextMcpServer {
     private toolHandlers: ToolHandlers;
 
     constructor(config: ContextMcpConfig) {
+        this.config = config;
         // Initialize MCP server
         this.server = new Server(
             {
@@ -246,7 +249,7 @@ This tool is versatile and can be used before completing various tasks to retrie
         });
     }
 
-    async start() {
+    private async prepareStart(): Promise<void> {
         console.log('[SYNC-DEBUG] MCP server start() method called');
         console.log('Starting Context MCP server...');
 
@@ -254,6 +257,17 @@ This tool is versatile and can be used before completing various tasks to retrie
         // left over from pre-fix MCP versions. Runs before the transport accepts
         // requests so clients never observe the poisoning state. See Issue #295.
         await this.toolHandlers.validateLegacyZeroEntries();
+    }
+
+    private startBackgroundSync(): void {
+        // Start background sync after server is connected
+        console.log('[SYNC-DEBUG] Initializing background sync...');
+        this.syncManager.startBackgroundSync();
+        console.log('[SYNC-DEBUG] MCP server initialization complete');
+    }
+
+    private async startStdio(): Promise<void> {
+        await this.prepareStart();
 
         const transport = new StdioServerTransport();
         console.log('[SYNC-DEBUG] StdioServerTransport created, attempting server connection...');
@@ -262,10 +276,26 @@ This tool is versatile and can be used before completing various tasks to retrie
         console.log("MCP server started and listening on stdio.");
         console.log('[SYNC-DEBUG] Server connection established successfully');
 
-        // Start background sync after server is connected
-        console.log('[SYNC-DEBUG] Initializing background sync...');
-        this.syncManager.startBackgroundSync();
-        console.log('[SYNC-DEBUG] MCP server initialization complete');
+        this.startBackgroundSync();
+    }
+
+    private async startHttp(): Promise<void> {
+        await this.prepareStart();
+
+        console.log('[SYNC-DEBUG] StreamableHTTPServerTransport created, attempting server connection...');
+        await startHttpTransport(this.server, this.config);
+        console.log('[SYNC-DEBUG] Server connection established successfully');
+
+        this.startBackgroundSync();
+    }
+
+    async start() {
+        if (this.config.transport === 'http') {
+            await this.startHttp();
+            return;
+        }
+
+        await this.startStdio();
     }
 }
 
@@ -281,7 +311,7 @@ async function main() {
     }
 
     // Create configuration
-    const config = createMcpConfig();
+    const config = createMcpConfig(args);
     logConfigurationSummary(config);
 
     const server = new ContextMcpServer(config);

@@ -3,6 +3,10 @@ import { envManager } from "@zilliz/claude-context-core";
 export interface ContextMcpConfig {
     name: string;
     version: string;
+    transport: 'stdio' | 'http';
+    httpHost: string;
+    httpPort: number;
+    httpPath: string;
     // Embedding provider configuration
     embeddingProvider: 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama' | 'OpenRouter';
     embeddingModel: string;
@@ -133,7 +137,60 @@ function getPositiveIntegerFromEnv(name: string): number | undefined {
     return undefined;
 }
 
-export function createMcpConfig(): ContextMcpConfig {
+function getCliOption(args: string[], name: string): string | undefined {
+    const flag = `--${name}`;
+    const flagWithEquals = `${flag}=`;
+
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === flag) {
+            return args[i + 1];
+        }
+        if (arg.startsWith(flagWithEquals)) {
+            return arg.substring(flagWithEquals.length);
+        }
+    }
+
+    return undefined;
+}
+
+function getTransport(args: string[]): 'stdio' | 'http' {
+    const rawTransport = getCliOption(args, 'transport') || envManager.get('MCP_TRANSPORT') || 'stdio';
+    const transport = rawTransport.trim().toLowerCase();
+
+    if (transport === 'stdio' || transport === 'http') {
+        return transport;
+    }
+
+    throw new Error(`Invalid MCP transport '${rawTransport}'. Expected 'stdio' or 'http'.`);
+}
+
+function getHttpPort(args: string[]): number {
+    const rawPort = getCliOption(args, 'port') || envManager.get('MCP_HTTP_PORT') || '3000';
+    const port = Number.parseInt(rawPort, 10);
+
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new Error(`Invalid MCP HTTP port '${rawPort}'. Expected an integer from 1 to 65535.`);
+    }
+
+    return port;
+}
+
+function getHttpPath(args: string[]): string {
+    const rawPath = getCliOption(args, 'path') || envManager.get('MCP_HTTP_PATH') || '/mcp';
+    const httpPath = rawPath.trim();
+
+    if (!httpPath.startsWith('/')) {
+        throw new Error(`Invalid MCP HTTP path '${rawPath}'. Expected a path starting with '/'.`);
+    }
+    if (httpPath.length > 1 && httpPath.endsWith('/')) {
+        return httpPath.slice(0, -1);
+    }
+
+    return httpPath;
+}
+
+export function createMcpConfig(args: string[] = process.argv.slice(2)): ContextMcpConfig {
     // Debug: Print all environment variables related to Context
     console.log(`[DEBUG] 🔍 Environment Variables Debug:`);
     console.log(`[DEBUG]   EMBEDDING_PROVIDER: ${envManager.get('EMBEDDING_PROVIDER') || 'NOT SET'}`);
@@ -149,6 +206,10 @@ export function createMcpConfig(): ContextMcpConfig {
     const config: ContextMcpConfig = {
         name: envManager.get('MCP_SERVER_NAME') || "Context MCP Server",
         version: envManager.get('MCP_SERVER_VERSION') || "1.0.0",
+        transport: getTransport(args),
+        httpHost: getCliOption(args, 'host') || envManager.get('MCP_HTTP_HOST') || '127.0.0.1',
+        httpPort: getHttpPort(args),
+        httpPath: getHttpPath(args),
         // Embedding provider configuration
         embeddingProvider: (envManager.get('EMBEDDING_PROVIDER') as 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama' | 'OpenRouter') || 'OpenAI',
         embeddingModel: getEmbeddingModelForProvider(envManager.get('EMBEDDING_PROVIDER') || 'OpenAI'),
@@ -178,6 +239,10 @@ export function logConfigurationSummary(config: ContextMcpConfig): void {
     console.log(`[MCP] 🚀 Starting Context MCP Server`);
     console.log(`[MCP] Configuration Summary:`);
     console.log(`[MCP]   Server: ${config.name} v${config.version}`);
+    console.log(`[MCP]   Transport: ${config.transport}`);
+    if (config.transport === 'http') {
+        console.log(`[MCP]   HTTP URL: http://${config.httpHost}:${config.httpPort}${config.httpPath}`);
+    }
     console.log(`[MCP]   Embedding Provider: ${config.embeddingProvider}`);
     console.log(`[MCP]   Embedding Model: ${config.embeddingModel}`);
     console.log(`[MCP]   Milvus Address: ${config.milvusAddress || (config.milvusToken ? '[Auto-resolve from token]' : '[Not configured]')}`);
@@ -225,10 +290,18 @@ Usage: npx @zilliz/claude-context-mcp@latest [options]
 
 Options:
   --help, -h                          Show this help message
+  --transport stdio|http               Transport to use (default: stdio)
+  --host <host>                        HTTP host when --transport http (default: 127.0.0.1)
+  --port <port>                        HTTP port when --transport http (default: 3000)
+  --path <path>                        HTTP MCP path when --transport http (default: /mcp)
 
 Environment Variables:
   MCP_SERVER_NAME         Server name
   MCP_SERVER_VERSION      Server version
+  MCP_TRANSPORT           Transport to use: stdio or http (default: stdio)
+  MCP_HTTP_HOST           HTTP host when MCP_TRANSPORT=http (default: 127.0.0.1)
+  MCP_HTTP_PORT           HTTP port when MCP_TRANSPORT=http (default: 3000)
+  MCP_HTTP_PATH           HTTP MCP path when MCP_TRANSPORT=http (default: /mcp)
   
   Embedding Provider Configuration:
   EMBEDDING_PROVIDER      Embedding provider: OpenAI, VoyageAI, Gemini, Ollama, OpenRouter (default: OpenAI)
